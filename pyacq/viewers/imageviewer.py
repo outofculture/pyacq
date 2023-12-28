@@ -28,7 +28,7 @@ class ImageViewer(WidgetNode):
 
         self.graphiclayout = pg.GraphicsLayoutWidget()
         self.layout.addWidget(self.graphiclayout)
-        
+
         #~ self.graphicsview = pg.GraphicsView()
         #~ self.layout.addWidget(self.graphicsview)
         
@@ -45,7 +45,7 @@ class ImageViewer(WidgetNode):
     def _configure(self, num_video=1, nb_column=4, **kargs):
         self.num_video = num_video
         self.nb_column = nb_column
-        
+
         if num_video == 1:
             pass
         else:
@@ -56,14 +56,14 @@ class ImageViewer(WidgetNode):
                 stream_spec['shape'] = (-1, -1, 3)
                 input = InputStream(spec=stream_spec)
                 self.inputs[f'video{i}'] = input
-   
+
     def _initialize(self):
         all_rates = [input.params['sample_rate'] for k, input in self.inputs.items()]
         max_rate = max(all_rates)
         self.timer = QtCore.QTimer(singleShot=False)
         self.timer.setInterval(int(1. / max_rate * 1000))
         self.timer.timeout.connect(self.poll_socket)
-        
+
         self.plots = []
         self.images = []
         for i in range(self.num_video):
@@ -81,7 +81,7 @@ class ImageViewer(WidgetNode):
             image = pg.ImageItem()
             plot.addItem(image)
             self.images.append(image)
-        
+
 
     def _start(self):
         self.timer.start()
@@ -94,13 +94,15 @@ class ImageViewer(WidgetNode):
     
     def poll_socket(self):
         for i, input in enumerate(self.inputs.values()):
-            event = input.socket.poll(0)
-            if event != 0:
-                while input.socket.poll(0)>0:
-                    index, data = input.recv()
-                data = data[::-1,:,:]
-                data = data.swapaxes(0,1)
-                self.images[i].setImage(data)
+            data = None
+            while input.socket.poll(0) > 0:
+                index, data = input.recv()
+            if data is None:
+                continue
+            data = data[::-1,:,:]
+            data = data.swapaxes(0,1)
+            self.images[i].setImage(data)
+
 
 
 register_node_type(ImageViewer)
