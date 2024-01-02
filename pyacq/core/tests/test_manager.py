@@ -4,10 +4,9 @@
 
 import logging
 import time
-from pyacq.core import Manager, create_manager
+from pyacq.core import create_manager
 from pyacq.core.host import Host
-from pyacq.core.rpc import ProcessSpawner
-import os
+
 import pytest
 
 

@@ -2,20 +2,18 @@
 # Copyright (c) 2016, French National Center for Scientific Research (CNRS)
 # Distributed under the (new) BSD License. See LICENSE for more info.
 
-import sys
-import os
-import json
-import subprocess
 import atexit
-import zmq
+import json
 import logging
+import subprocess
+import sys
 import threading
 import time
-from pyqtgraph.Qt import QtCore
+
+import zmq
 
 from .client import RPCClient
 from .log import get_logger_address, LogSender
-
 
 logger = logging.getLogger(__name__)
 

@@ -182,7 +182,6 @@ class OutputStream(object):
         self.sender.reset_index()
 
 
-
 def _shape_equal(shape1, shape2):
     """
     Check if shape of stream are compatible.
@@ -205,6 +204,7 @@ def _shape_equal(shape1, shape2):
     
 
 class InputStream(object):
+
     """Class for streaming data from an OutputStream.
     
     Streams allow data to be sent between objects that may exist on different
@@ -395,4 +395,3 @@ class InputStream(object):
         """
         if self.buffer is not None and self._own_buffer:
              self.buffer.reset_index()
-            

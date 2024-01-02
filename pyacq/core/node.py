@@ -7,7 +7,6 @@ from pyqtgraph.util.mutex import Mutex
 
 from .nodelist import register_node_type
 from .stream import OutputStream, InputStream
-from logging import info
 
 
 class Node(object):
