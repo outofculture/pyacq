@@ -114,70 +114,76 @@ class RingBuffer:
         self._set_write_index(0)
         self._set_read_index(0)
     
-    def new_chunk(self, data, index=None):
-        dsize = data.shape[0]
+    def new_chunk(self, data, index=None) -> int:
         bsize = self.shape[0]
-        if dsize > bsize:
-            raise ValueError("Data chunk size %d is too large for ring "
-                            "buffer of size %d." % (dsize, bsize))
+        if len(data.shape) >= len(self.shape):
+            raise ValueError(f"Data has too many dimensions ({len(data.shape)} >= {len(self.shape)})")
+        # TODO think about allowing this:
+        # elif len(data.shape) == len(self.shape):
+        #     dsize = data.shape[0]
+        #     if dsize > self.shape[0]:
+        #         raise ValueError(f"Data chunk size {data.shape} is too large for ring buffer of size {self.shape}.")
+        else:
+            dsize = 1
         if data.dtype != self.dtype:
-            raise TypeError("Data has incorrect dtype %s (buffer requires %s)" %
-                            (data.dtype, self.dtype))
-        
+            raise TypeError(f"Data has incorrect dtype {data.dtype} (buffer requires {self.dtype})")
+
         # by default, index advances by the size of the chunk
         if index is None:
             index = self._write_index + dsize
-        
-        assert dsize <= index - self._write_index, ("Data size is %d, but index "
-                                                    "only advanced by %d. (index=%d, self._write_index=%d)" % 
-                                                    (dsize, index-self._write_index, index, self._write_index)) 
+
+        if dsize > index - self._write_index:
+            raise ValueError(
+                f"Data size is {dsize}, but index only advanced by {index - self._write_index}. "
+                f"(index={index}, self._write_index={self._write_index})"
+            )
 
         revert_inds = [self._read_index, self._write_index]
         try:
             # advance write index. This immediately prevents other processes from
             # accessing memory that is about to be overwritten.
             self._set_write_index(index)
-            
+
             # decide if any skipped data needs to be filled in
             fill_start = max(self._read_index, self._write_index - bsize)
             fill_stop = self._write_index - dsize
-            
+
             if fill_stop > fill_start:
                 # data was skipped; fill in missing regions with 0 or nan.
-                self._write(fill_start, fill_stop, self._filler)
+                self._write(fill_start, fill_stop, self._filler, is_scalar=True)
                 revert_inds[1] = fill_stop
-                
+
             self._write(self._write_index - dsize, self._write_index, data)
-                
+
             self._set_read_index(index)
         except:
             # If there is a failure writing data, revert read/write pointers
             self._set_read_index(revert_inds[0])
             self._set_write_index(revert_inds[1])
             raise
+        return dsize
 
-    def _write(self, start, stop, value):
+    def _write(self, start, stop, value, is_scalar=False):
         # get starting index
         bsize = self.shape[0]
         dsize = stop - start
-        i = start % bsize
-        
+        start = start % bsize
+
+        # TODO this looks like it will break; test it.
         if self.double:
-            self.buffer[i:i+dsize] = value
-            i += bsize
-        
-        if i + dsize <= self.buffer.shape[0]:
-            self.buffer[i:i+dsize] = value
+            self.buffer[start:start+dsize] = value
+            start += bsize
+
+        if start + dsize <= self.buffer.shape[0]:
+            self.buffer[start:start+dsize] = value
         else:
-            n = self.buffer.shape[0]-i
-            if hasattr(value, '__len__'):
-                # case array
-                self.buffer[i:] = value[:n]
-                self.buffer[:dsize-n] = value[n:]
+            n = self.buffer.shape[0] - start
+            if is_scalar:  # (e.g. when setting value to self._filler)
+                self.buffer[start:] = value
+                self.buffer[:dsize - n] = value
             else:
-                # case value is a scalar (when self._filler)
-                self.buffer[i:] = value
-                self.buffer[:dsize-n] = value
+                self.buffer[start:] = value[:n]
+                self.buffer[:dsize-n] = value[n:]
 
     def __getitem__(self, item):
         if isinstance(item, tuple):
@@ -186,7 +192,7 @@ class RingBuffer:
         else:
             first = item
             rest = None
-        
+
         if isinstance(first, (int, np.integer)):
             start = self._interpret_index(first)
             stop = start + 1
@@ -199,8 +205,8 @@ class RingBuffer:
             if rest is not None:
                 data = data[rest]
         else:
-            raise TypeError("Invalid index type %s" % type(first))
-        
+            raise TypeError(f"Invalid index type {type(first)}")
+
         return data
 
     def get_data(self, start, stop, copy=False, join=True):
@@ -228,20 +234,20 @@ class RingBuffer:
         if start < first or stop > last:
             raise IndexError("Requested segment (%d, %d) is out of bounds for ring buffer. "
                              "Current bounds are (%d, %d)." % (start, stop, first, last))
-        
+
         bsize = self.shape[0]
         copied = False
-        
+
         if self.double:
-            # This do not work when get_data(-10, 50) meaning stop=50 length=60 (start=stop-length)
+            # This does not work when get_data(-10, 50) meaning stop=50 length=60 (start=stop-length)
             # this is util at the beging to get larger buffer than already possible
             #start_ind = start % bsize
             #stop_ind = start_ind + (stop - start)
-            
+
             # I prefer this which equivalent but work with start<0:
             stop_ind = stop%bsize + bsize
             start_ind = stop_ind - (stop - start)
-            
+
             data = self.buffer[start_ind:stop_ind]
         else:
             break_index = self._write_index - (self._write_index % bsize)
@@ -256,9 +262,9 @@ class RingBuffer:
                 b = self.buffer[:stop%bsize]
                 if join is False:
                     if copy is True:
-                        return (a.copy(), b.copy())
+                        return a.copy(), b.copy()
                     else:
-                        return (a, b)
+                        return a, b
                 else:
                     data = np.empty(newshape, self.buffer.dtype).transpose(np.argsort(self.axisorder))
                     #data[:break_index-start] = a #not robust if break_index==start
@@ -266,15 +272,14 @@ class RingBuffer:
                     data[:a.shape[0]] = a
                     data[a.shape[0]:] = b
                     copied = True
-        
+
         if copy and not copied:
             data = data.copy()
-            
+
         if join:
             return data
-        else:
-            empty = np.empty((0,) + data.shape[1:], dtype=data.dtype)
-            return data, empty
+        empty = np.empty((0,) + data.shape[1:], dtype=data.dtype)
+        return data, empty
 
     def _interpret_index(self, index):
         """Return normalized index, accounting for negative and None values.

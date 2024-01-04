@@ -32,7 +32,9 @@ class SharedMemSender(DataSender):
     def __init__(self, socket, params):
         DataSender.__init__(self, socket, params)
         self.size = self.params['buffer_size']
-        shape = (self.size,) + tuple(self.params['shape'][1:])
+        if self.params["shape"][0] == -1:
+            raise ValueError("SharedMemSender requires a fixed buffer size; no -1s allowed.")
+        shape = (self.size,) + tuple(self.params['shape'])
         self._buffer = RingBuffer(shape=shape, dtype=make_dtype(self.params['dtype']),
                                   shmem=True, axisorder=self.params['axisorder'],
                                   double=self.params['double'], fill=self.params['fill'])
@@ -41,14 +43,12 @@ class SharedMemSender(DataSender):
     def send(self, index, data):
         assert data.dtype == self.params['dtype']
         shape = data.shape
-        if self.params['shape'][0] != -1:
-            assert shape == self.params['shape']
-        else:
-            assert tuple(shape[1:]) == tuple(self.params['shape'][1:]), '{} {}'.format(shape, self.params['shape'])
- 
-        self._buffer.new_chunk(data, index)
-        
-        stat = struct.pack('!' + 'QQ', index, shape[0])
+        if tuple(shape) != tuple(self.params['shape'][-len(shape):]):
+            raise ValueError(f"{shape} not compatible {self.params['shape']}")
+
+        dsize = self._buffer.new_chunk(data, index)
+
+        stat = struct.pack('!' + 'QQ', index, dsize)
         self.socket.send_multipart([stat])
     
     def reset_index(self):
@@ -61,11 +61,13 @@ class SharedMemReceiver(DataReceiver):
         DataReceiver.__init__(self, socket, params)
 
         self.size = self.params['buffer_size']
-        shape = (self.size,) + tuple(self.params['shape'][1:])
+        if self.params["shape"][0] == -1:
+            raise ValueError("SharedMemSender requires a fixed buffer size; no -1s allowed.")
+        shape = (self.size,) + tuple(self.params['shape'])
         self.buffer = RingBuffer(shape=shape, dtype=self.params['dtype'], double=self.params['double'],
                                  shmem=self.params['shm_id'], axisorder=self.params['axisorder'])
 
-    def recv(self, return_data=False):
+    def recv(self, return_data=True):
         """Receive message indicating the index of the next data chunk.
         
         Parameters:
@@ -74,7 +76,7 @@ class SharedMemReceiver(DataReceiver):
             If True, return the new data chunk (this may involve copying data
             from the shared ring buffer). If False, then return None in place
             of data (the new data can still be accessed using __getitem__). The
-            default is False.
+            default is True.
         """
         stat = self.socket.recv_multipart()[0]
         index, size = struct.unpack('!QQ', stat)

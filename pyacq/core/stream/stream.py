@@ -89,7 +89,7 @@ class OutputStream(object):
             The shape of each data frame. If the stream will send chunks of variable length,
             then use -1 for the first (time) dimension.
             
-            * For ``streamtype=image``, the shape should be ``(-1, H, W)`` or ``(n_frames, H, W)``.
+            * For ``streamtype=image``, the shape should be ``(-1, H, W)``, ``(n_frames, H, W)`` or ``(H, W)``.
             * For ``streamtype=analogsignal`` the shape should be ``(n_samples, n_channels)`` or ``(-1, n_channels)``.
         compression: '', 'blosclz', 'blosc-lz4'
             The compression for the data stream. The default uses no compression.
@@ -111,19 +111,20 @@ class OutputStream(object):
         self.params = dict(default_stream)
         self.params.update(self.spec)
         for k in kargs:
-            if k in self.spec:
-                assert kargs[k]==self.spec[k], \
-                    'Cannot configure {}={}; already in fixed in self.spec {}={}'.format(k, kargs[k], k, self.spec[k])
+            if k in self.spec and kargs[k] != self.spec[k]:
+                raise ValueError(f'Cannot configure {k}={kargs[k]}; already in fixed in self.spec {k}={self.spec[k]}')
         self.params.update(kargs)
         if 'dtype' in self.params:
             # fix error in structred dtype with bad serilization
             self.params['dtype'] = fix_struct_dtype(self.params['dtype'])
-        
+
         shape = self.params['shape']
-        assert shape[0] == -1 or shape[0] > 0, "First element in shape must be -1 or > 0."
+        if shape[0] != -1 and shape[0] <= 0:
+            raise ValueError("First element in shape must be -1 or > 0.")
         for i in range(1, len(shape)):
-            assert shape[i] > 0, "Shape index %d must be > 0." % i
-        
+            if shape[i] <= 0:
+                raise ValueError(f"Shape index {i} must be > 0.")
+
         if self.params['protocol'] in ('inproc', 'ipc'):
             pipename = u'pyacq_pipe_'+''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(24))
             self.params['interface'] = pipename
@@ -137,10 +138,10 @@ class OutputStream(object):
         self.addr = self.socket.getsockopt(zmq.LAST_ENDPOINT).decode()
         self.port = self.addr.rpartition(':')[2]
         self.params['port'] = self.port
-        
+
         transfermode = self.params['transfermode']
         if transfermode not in all_transfermodes:
-            raise ValueError("Unsupported transfer mode '%s'" % transfermode)
+            raise ValueError(f"Unsupported transfer mode '{transfermode}'")
         sender_class = all_transfermodes[transfermode][0]
         self.sender = sender_class(self.socket, self.params)
 
